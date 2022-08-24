@@ -1,6 +1,8 @@
 import tweepy
 import sqlite3
 import time
+import re
+from dateutil import tz
 import pandas as pd
 import streamlit as st
 from streamlit_tags import st_tags
@@ -18,8 +20,9 @@ def get_csv_download_link(csv, filename):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}.csv">Download CSV</a>'
     return href
 
-def convert_df(df):
-    return df.to_csv().encode('utf-8')
+def regexp(expr, item):
+    reg = re.compile(expr)
+    return reg.search(item) is not None
 
 def main():
     try:
@@ -38,6 +41,7 @@ def main():
             if submit_button:
 
                 conn = sqlite3.connect("tweet_collection.db")
+                conn.create_function("REGEXP", 2, regexp)
                 c = conn.cursor()
                 create_table = 'CREATE TABLE Tweets ('
                 create_table += 'num INTEGER PRIMARY KEY AUTOINCREMENT, '
@@ -66,21 +70,25 @@ def main():
 
                     def on_status(self, status):
                         if (time.time() - self.start_time) < self.limit:
-                            if hasattr(status, "extended_tweet"):
-                                tweet = status.extended_tweet["full_text"]
+                            if not status.retweeted:
+                                if hasattr(status, "extended_tweet"):
+                                    tweet = status.extended_tweet["full_text"]
+                                else:
+                                    tweet = status.text
+                                location = status.user.location
+                                username = status.user.screen_name
+                                utc = status.created_at.replace(tzinfo=tz.gettz('UTC'))
+                                created_at = utc.astimezone(tz.gettz('Asia/Kolkata'))
+                                media = []
+                                hashtaglist = []
+                                for url in status.entities['urls']:
+                                    media.append(url['url'])
+                                for hash in status.entities['hashtags']:
+                                    hashtaglist.append(hash['text'])   
+                                links = ", ".join(media)
+                                hashtags = ", ".join(hashtaglist)
                             else:
-                                tweet = status.text
-                            location = status.user.location
-                            username = status.user.screen_name
-                            created_at = status.created_at
-                            media = []
-                            hashtaglist = []
-                            for url in status.entities['urls']:
-                                media.append(url['url'])
-                            for hash in status.entities['hashtags']:
-                                hashtaglist.append(hash['text'])   
-                            links = ", ".join(media)
-                            hashtags = ", ".join(hashtaglist)
+                                created_at = username = tweet = location = hashtags = links = None
                         else:
                             return False
 
@@ -102,7 +110,7 @@ def main():
                 except AttributeError:
                     pass
                 
-                query = c.execute('SELECT * FROM Tweets')
+                query = c.execute("SELECT * FROM Tweets WHERE Tweet NOT REGEXP '^RT @'")
                 cols = [column[0] for column in query.description]
                 results_df = pd.DataFrame.from_records(data = query.fetchall(), columns = cols)
                 AgGrid(results_df)
@@ -116,5 +124,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
