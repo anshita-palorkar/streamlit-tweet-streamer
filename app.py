@@ -1,8 +1,6 @@
 import tweepy
 import sqlite3
 import time
-import re
-from dateutil import tz
 import pandas as pd
 import streamlit as st
 from streamlit_tags import st_tags
@@ -20,9 +18,8 @@ def get_csv_download_link(csv, filename):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}.csv">Download CSV</a>'
     return href
 
-def regexp(expr, item):
-    reg = re.compile(expr)
-    return reg.search(item) is not None
+def convert_df(df):
+    return df.to_csv().encode('utf-8')
 
 def main():
     try:
@@ -32,7 +29,7 @@ def main():
                                 text='Press enter to add more',
                                 maxtags = -1,
                                 key='1')
-            taglist = " ".join(keywords)
+            #taglist = " #".join(keywords)
             n = st.slider('Stream Time (in seconds):', 0, 600, step=30)
             output_csv = st.radio('Save a CSV file?', ['Yes', 'No'])
             file_name = st.text_input('Name the CSV file:')
@@ -41,7 +38,6 @@ def main():
             if submit_button:
 
                 conn = sqlite3.connect("tweet_collection.db")
-                conn.create_function("REGEXP", 2, regexp)
                 c = conn.cursor()
                 create_table = 'CREATE TABLE Tweets ('
                 create_table += 'num INTEGER PRIMARY KEY AUTOINCREMENT, '
@@ -70,25 +66,21 @@ def main():
 
                     def on_status(self, status):
                         if (time.time() - self.start_time) < self.limit:
-                            if not status.retweeted:
-                                if hasattr(status, "extended_tweet"):
-                                    tweet = status.extended_tweet["full_text"]
-                                else:
-                                    tweet = status.text
-                                location = status.user.location
-                                username = status.user.screen_name
-                                utc = status.created_at.replace(tzinfo=tz.gettz('UTC'))
-                                created_at = utc.astimezone(tz.gettz('Asia/Kolkata'))
-                                media = []
-                                hashtaglist = []
-                                for url in status.entities['urls']:
-                                    media.append(url['url'])
-                                for hash in status.entities['hashtags']:
-                                    hashtaglist.append(hash['text'])   
-                                links = ", ".join(media)
-                                hashtags = ", ".join(hashtaglist)
+                            if hasattr(status, "extended_tweet"):
+                                tweet = status.extended_tweet["full_text"]
                             else:
-                                created_at = username = tweet = location = hashtags = links = None
+                                tweet = status.text
+                            location = status.user.location
+                            username = status.user.screen_name
+                            created_at = status.created_at
+                            media = []
+                            hashtaglist = []
+                            for url in status.entities['urls']:
+                                media.append(url['url'])
+                            for hash in status.entities['hashtags']:
+                                hashtaglist.append(hash['text'])   
+                            links = ", ".join(media)
+                            hashtags = ", ".join(hashtaglist)
                         else:
                             return False
 
@@ -106,11 +98,11 @@ def main():
                 tweets_listener = MyStreamListener(api)
                 stream = tweepy.Stream(api.auth, tweets_listener)
                 try:
-                    stream.filter(track=taglist, languages=["en", "hi"])
+                    stream.filter(track=keywords, languages=["en", "hi"])
                 except AttributeError:
                     pass
                 
-                query = c.execute("SELECT * FROM Tweets WHERE Tweet NOT REGEXP '^RT @'")
+                query = c.execute('SELECT * FROM Tweets')
                 cols = [column[0] for column in query.description]
                 results_df = pd.DataFrame.from_records(data = query.fetchall(), columns = cols)
                 AgGrid(results_df)
@@ -124,3 +116,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
